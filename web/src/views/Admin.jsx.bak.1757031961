@@ -1,0 +1,110 @@
+import React, { useEffect, useState } from 'react'
+import { useAuth } from '../auth/AuthContext.jsx'
+
+export default function Admin(){
+  const { fetchWithAuth } = useAuth()
+
+  // Tab 1: Status setzen (wie zuvor)
+  const [oid, setOid] = useState('')
+  const [status, setStatus] = useState('bestätigt')
+  const [msg1, setMsg1] = useState('')
+
+  const changeStatus = async ()=>{
+    setMsg1('')
+    const r = await fetchWithAuth(`/api/orders/${oid}/status`, {
+      method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ status, note:'via Admin' })
+    })
+    const data = await r.json(); setMsg1(r.ok ? '✅ Status aktualisiert.' : ('Fehler: ' + (data?.error||'fail')))
+  }
+
+  // Tab 2: Produkt-Highlights
+  const [items, setItems] = useState([])
+  const [fProduct, setFProduct] = useState('')
+  const [form, setForm] = useState({ featured:false, badge_text:'', badge_color:'#22c55e', highlight_title:'', highlight_desc:'', promo_until:'', sale_price_cents:'', banner_image_url:'', featured_order:0 })
+  const [msg2, setMsg2] = useState('')
+
+  useEffect(()=>{ (async()=>{
+    const r = await fetchWithAuth('/api/admin/product-meta')
+    const data = await r.json()
+    setItems(data.items||[])
+  })() },[])
+
+  useEffect(()=>{
+    const p = items.find(x => String(x.product_id||x.id) === String(fProduct))
+    if (p){
+      setForm({
+        featured: !!(p.featured|0),
+        badge_text: p.badge_text||'',
+        badge_color: p.badge_color||'#22c55e',
+        highlight_title: p.highlight_title||'',
+        highlight_desc: p.highlight_desc||'',
+        promo_until: p.promo_until||'',
+        sale_price_cents: p.sale_price_cents ?? '',
+        banner_image_url: p.banner_image_url||'',
+        featured_order: p.featured_order||0
+      })
+    }
+  }, [fProduct, items])
+
+  const saveMeta = async ()=>{
+    setMsg2('')
+    if (!fProduct) return setMsg2('Bitte Produkt wählen.')
+    const body = { product_id: Number(fProduct), ...form, sale_price_cents: form.sale_price_cents===''? null : Number(form.sale_price_cents) }
+    const r = await fetchWithAuth('/api/admin/product-meta', {
+      method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify(body)
+    })
+    const data = await r.json(); setMsg2(r.ok ? '✅ Gespeichert.' : ('Fehler: ' + (data?.error||'fail')))
+  }
+
+  const onChange = (k,v)=> setForm(prev=>({...prev, [k]:v}))
+
+  return (
+    <div className="space-y-6">
+      <section className="card">
+        <div className="font-semibold mb-2">Bestellstatus setzen</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <input className="input" placeholder="Order-ID" value={oid} onChange={e=>setOid(e.target.value)} />
+          <select className="input" value={status} onChange={e=>setStatus(e.target.value)}>
+            <option>wartet_bestätigung</option><option>bestätigt</option><option>unterwegs</option><option>zugestellt</option><option>abgebrochen</option>
+          </select>
+          <button className="btn" onClick={changeStatus}>Status setzen</button>
+        </div>
+        {msg1 ? <div className="mt-2 opacity-80">{msg1}</div> : null}
+      </section>
+
+      <section className="card">
+        <div className="font-semibold mb-3">Produkt-Highlights</div>
+        <div className="grid gap-2">
+          <select className="input" value={fProduct} onChange={e=>setFProduct(e.target.value)}>
+            <option value="">— Produkt wählen —</option>
+            {items.map(it=> <option key={it.id} value={it.id}>{it.name} (#{it.id})</option>)}
+          </select>
+          {fProduct && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={form.featured} onChange={e=>onChange('featured', e.target.checked)} />
+                  Featured (Hero)
+                </label>
+                <input className="input" placeholder="Sortierung (featured_order)" type="number" value={form.featured_order} onChange={e=>onChange('featured_order', Number(e.target.value||0))} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input" placeholder="Badge-Text (z.B. Neu, Sale)" value={form.badge_text} onChange={e=>onChange('badge_text', e.target.value)} />
+                <input className="input" placeholder="Badge-Farbe (#hex)" value={form.badge_color} onChange={e=>onChange('badge_color', e.target.value)} />
+              </div>
+              <input className="input" placeholder="Highlight Titel" value={form.highlight_title} onChange={e=>onChange('highlight_title', e.target.value)} />
+              <input className="input" placeholder="Highlight Beschreibung" value={form.highlight_desc} onChange={e=>onChange('highlight_desc', e.target.value)} />
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input" placeholder="Sale-Preis (Cent)" type="number" value={form.sale_price_cents} onChange={e=>onChange('sale_price_cents', e.target.value)} />
+                <input className="input" placeholder="Promo bis (ISO yyyy-mm-dd)" value={form.promo_until} onChange={e=>onChange('promo_until', e.target.value)} />
+              </div>
+              <input className="input" placeholder="Banner-Bild URL" value={form.banner_image_url} onChange={e=>onChange('banner_image_url', e.target.value)} />
+              <button className="btn mt-2" onClick={saveMeta}>Speichern</button>
+              {msg2 ? <div className="mt-2 opacity-80">{msg2}</div> : null}
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}
