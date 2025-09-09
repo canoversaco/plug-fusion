@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{ --pf-glow:#22c55e; }
+
+/* Sticky Header */
+.pf-hero{position:sticky;top:0;z-index:20;padding:.8rem .9rem;background:linear-gradient(180deg,rgba(2,6,23,.92),rgba(2,6,23,.75));border-bottom:1px solid rgba(148,163,184,.15);backdrop-filter:blur(8px)}
+
+/* Kategorie-Buttons */
+@keyframes pfGlow{0%,100%{box-shadow:0 0 0 rgba(99,102,241,0)}50%{box-shadow:0 0 18px currentColor}}
+.pf-cats{display:flex;gap:.6rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:.6rem .8rem}
+.pf-cats::-webkit-scrollbar{display:none}
+.pf-catbtn{appearance:none;border:1px solid rgba(148,163,184,.25);background:#0b1220;color:#e5e7eb;
+  padding:.5rem .9rem;border-radius:999px;font-size:.92rem;font-weight:800;white-space:nowrap;
+  transition:transform .15s ease, border-color .15s ease, background .15s ease, color .15s ease}
+.pf-catbtn:active{transform:scale(.98)}
+.pf-catbtn--active{background:linear-gradient(135deg,#0ea5e9,#22c55e);border-color:transparent;color:#061b12}
+.pf-catbtn--glow{color:var(--pf-glow,#a78bfa);animation:pfGlow 2s ease-in-out infinite}
+
+/* Kompakte Produktliste */
+.pf-list{padding:.8rem;display:grid;grid-template-columns:1fr;gap:.6rem}
+.pf-card{background:#0b1220;border:1px solid rgba(148,163,184,.15);border-radius:16px;padding:.6rem}
+.pf-row{display:flex;gap:.6rem}
+.pf-thumb{width:44px;height:44px;border-radius:12px;overflow:hidden;background:#0f172a;flex:0 0 auto}
+.pf-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.pf-title{font-weight:800;font-size:.95rem;line-height:1.15}
+.pf-meta{font-size:.72rem;opacity:.75}
+.pf-price{font-weight:900;font-size:.95rem}
+.pf-qtychip{padding:.22rem .48rem;border-radius:999px;border:1px solid rgba(148,163,184,.25);font-size:.78rem}
+.pf-qtychip-active{background:#22c55e;color:#061b12;border-color:#22c55e}
+
+/* Schöner Warenkorb als Bottom-Sheet */
+.pf-sheet{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);display:flex;align-items:flex-end}
+.pf-panel{width:100%;max-height:82vh;overflow:auto;background:#020617;border-top:1px solid rgba(148,163,184,.2);border-radius:20px 20px 0 0;padding:12px}
+.pf-handle{width:44px;height:4px;border-radius:99px;background:rgba(148,163,184,.35);margin:6px auto 10px}
+.pf-line{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.pf-qty{display:flex;align-items:center;gap:.4rem}
+.btn{background:#111827;border:1px solid rgba(148,163,184,.25);padding:.55rem .9rem;border-radius:12px}
+.btn-ghost{background:transparent;border:1px solid rgba(148,163,184,.2);padding:.5rem .8rem;border-radius:12px}
+.input{background:#0b1220;border:1px solid rgba(148,163,184,.25);border-radius:12px;padding:.55rem .8rem;width:100%}
+.card{background:#0b1220;border:1px solid rgba(148,163,184,.15);border-radius:16px;padding:.8rem}
+.pf-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:50}

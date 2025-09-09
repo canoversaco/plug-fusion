@@ -1,0 +1,20 @@
+import React from 'react'
+import { useAuth } from './auth/AuthContext.jsx'
+
+export default function App(){
+  const { user, logout } = useAuth()
+  return (
+    <div style={{padding:24}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <h3 style={{margin:0}}>Plug Fusion</h3>
+        <div>
+          <span style={{opacity:.7, marginRight:8}}>Eingeloggt als <b>{user?.username}</b></span>
+          <button onClick={logout} className="btn">Logout</button>
+        </div>
+      </div>
+      <div className="card">
+        <div>✅ Login erfolgreich. Hier kommen deine Inhalte hin.</div>
+      </div>
+    </div>
+  )
+}

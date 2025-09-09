@@ -1,0 +1,23 @@
+import './chatOverlayBoot.js'
+import { mountChatFab } from './ChatFab.js'
+if (typeof window!=='undefined') { setTimeout(mountChatFab, 120) }
+
+import { mountChatFab } from './ChatFab.js'
+import { CartProvider } from "./cart/CartContext.jsx";
+import "./styles.css";
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { AuthProvider, useAuth } from './auth/AuthContext.jsx'
+import Login from './auth/Login.jsx'
+import App from './App.jsx'
+
+function Gate(){
+  const { loading, user } = useAuth()
+  if (loading) return <div className="center"><div className="card">Lade…</div></div>
+  return user ? <App /> : <Login />
+}
+createRoot(document.getElementById('root')).render(
+  <AuthProvider><CartProvider><Gate/></CartProvider></AuthProvider>
+)
+// auto-mount Chat FAB
+if (typeof window!=='undefined') { setTimeout(mountChatFab, 50) }
