@@ -1,0 +1,260 @@
+import adminOrdersFallback from './routes/admin-orders-fallback.js'
+import express from 'express'
+import cors from 'cors'
+import helmet from 'helmet'
+import pinoHttp from 'pino-http'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import 'dotenv/config'
+import jwt from 'jsonwebtoken'
+import bcrypt from 'bcrypt'
+import rateLimit from 'express-rate-limit'
+import { query, tx, driver } from './db/index.js'
+import buildRoutes from './routes/plug-extended.js'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const app = express()
+
+// __PF_ADMIN_INLINE__ START
+// Admin/Orders-Fallback direkt in app (keine Abhängigkeit von vorhandenen Routern)
+
+function __pf_decodeJwt(token){
+  try{
+    const p = token.split('.')[1]
+    return JSON.parse(Buffer.from(p, 'base64url').toString('utf8'))
+  }catch{ return null }
+}
+function __pf_parseAuth(req){
+  if (req.user) return req.user
+  const hdr = req.headers?.authorization || ''
+  if (!hdr.startsWith('Bearer ')) return null
+  const payload = __pf_decodeJwt(hdr.slice(7))
+  if (!payload) return null
+  return { id: payload.sub ?? payload.id, username: payload.username, role: payload.role || 'user' }
+}
+function __pf_withAuth(req,res,next){
+  const u = __pf_parseAuth(req)
+  if (!u) return res.status(401).json({ error:'unauth' })
+  req.user = u; next()
+}
+function __pf_requireRole(){
+  const roles = Array.from(arguments)
+  return (req,res,next)=>{
+    if (!req.user) return res.status(401).json({error:'unauth'})
+    if (!roles.length || roles.includes(req.user.role)) return next()
+    return res.status(403).json({error:'forbidden'})
+  }
+}
+let __pf_dbmod = null
+async function __pf_query(sql, params=[]){
+  try{
+    if (!__pf_dbmod){
+      // dynamischer Import, egal ob ESM/CJS
+      __pf_dbmod = await import('./db/index.js')
+    }
+    const q = __pf_dbmod.query || (__pf_dbmod.default && __pf_dbmod.default.query)
+    return await q(sql, params)
+  }catch(e){
+    console.error('[sql]', e?.message||e)
+    return { rows: [] }
+  }
+}
+
+// Debug: Wer bin ich?
+app.get('/api/_whoami', __pf_withAuth, (req,res)=> res.json({ user: req.user }))
+
+// Admin: kompletter Katalog (Produkte+Kategorien+Meta)
+app.get('/api/admin/catalog', __pf_withAuth, __pf_requireRole('admin'), async (_req,res)=>{
+  const cats = await __pf_query(`SELECT * FROM categories ORDER BY position ASC, id ASC`, [])
+  const prods = await __pf_query(`
+    SELECT p.*, c.name AS category_name,
+           m.featured, m.badge_text, m.badge_color, m.sale_price_cents,
+           m.highlight_title, m.highlight_desc, m.banner_image_url, m.featured_order, m.promo_until
+      FROM products p
+      LEFT JOIN categories c ON c.id=p.category_id
+      LEFT JOIN product_meta m ON m.product_id=p.id
+      ORDER BY p.id DESC
+  `, [])
+  res.json({ categories: cats.rows||[], products: prods.rows||[] })
+})
+
+// Admin: Orders & Users
+app.get(`/api/admin/orders', __pf_withAuth, __pf_requireRole('admin'), async (_req,res)=>{
+  const q = await __pf_query('SELECT * FROM orders ORDER BY id DESC LIMIT 300', [])
+  res.json({ orders: q.rows||[] })
+})
+app.get('/api/admin/users', __pf_withAuth, __pf_requireRole('admin'), async (_req,res)=>{
+  const q = await __pf_query('SELECT id, username, role, wallet_balance_cents FROM users ORDER BY username ASC', [])
+  res.json({ users: q.rows||[] })
+})
+
+// User: Eigene Orders
+app.get('/api/my/orders', __pf_withAuth, async (req,res)=>{
+  const u = req.user.username
+  const q = await __pf_query('SELECT * FROM orders WHERE user_username=? ORDER BY id DESC LIMIT 100', [u])
+  res.json({ orders: q.rows||[] })
+})
+
+// __PF_ADMIN_INLINE__ END
+app.use(cors())
+app.use(helmet({ contentSecurityPolicy:false, crossOriginEmbedderPolicy:false }))
+app.use(express.json({ limit: '2mb' }))
+app.use(pinoHttp({ autoLogging: true }))
+
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e))
+process.on('uncaughtException', (e) => console.error('[uncaughtException]', e))
+
+const PORT = process.env.PORT || 8080
+const JWT_SECRET = process.env.JWT_SECRET || 'change_me_please'
+
+// ---- JWT-Parser: setzt req.user, wenn ein Token vorhanden ist ----
+app.use((req,res,next)=>{
+  const h=req.headers.authorization||''; const m=h.match(/^Bearer (.+)$/)
+  if(m){ try{ req.user = jwt.verify(m[1], JWT_SECRET) }catch{} }
+  next()
+})
+
+// ---- kleine Helfer ----
+const limiter = rateLimit({ windowMs: 60_000, max: 20 })
+const auth = (req,res,next)=> req.user ? next() : res.status(401).json({error:'unauthenticated'})
+
+// ---- API BASIS ----
+app.get('/api/health', async (_req, res) => {
+  try {
+    const r = await query('SELECT 1 as ok', [])
+    const ok = !!(r.rows?.length)
+    res.json({ ok, db: ok, driver, ts: Date.now() })
+  } catch {
+    res.status(500).json({ ok: false })
+  }
+})
+
+app.post('/api/login', limiter, async (req,res)=>{
+  const { username, password } = req.body || {}
+  if (!username || !password) return res.status(400).json({ error: 'missing_credentials' })
+  const r = await query('SELECT id, username, role, password_hash FROM users WHERE username = ? LIMIT 1', [username])
+  const u = r.rows?.[0]
+  if (!u) return res.status(401).json({ error: 'invalid_login' })
+  const ok = await bcrypt.compare(password, u.password_hash || '')
+  if (!ok) return res.status(401).json({ error: 'invalid_login' })
+  const token = jwt.sign({ sub:u.id, username:u.username, role:u.role }, JWT_SECRET, { expiresIn:'7d' })
+  res.json({ token, user:{ id:u.id, username:u.username, role:u.role } })
+})
+
+app.get('/api/me', auth, async (req,res)=>{
+  const r = await query('SELECT id, username, role FROM users WHERE id = ? LIMIT 1', [req.user.sub])
+  res.json({ user: r.rows?.[0] || null })
+})
+
+// ---- Kategorien/Produkte/Bestellungen/Chat (bestehende Kern-API) ----
+app.get('/api/categories', async (_req, res) => {
+  const r = await query('SELECT * FROM categories ORDER BY position ASC, id ASC', [])
+  res.json({ categories: r.rows })
+})
+app.post('/api/categories', auth, async (req, res) => {
+  const { name, position = 0, active = true } = req.body || {}
+  if (!name) return res.status(400).json({ error: 'name ist erforderlich' })
+  await query('INSERT INTO categories(name, position, active) VALUES (?,?,?)', [name, position|0, active?1:0])
+  const r = await query('SELECT * FROM categories WHERE name = ? LIMIT 1', [name])
+  res.json(r.rows?.[0] || { ok: true })
+})
+app.get('/api/products', async (_req, res) => {
+  const r = await query(
+    'SELECT p.*, c.name AS category_name,
+    m.featured, m.badge_text, m.badge_color, m.highlight_title, m.highlight_desc,
+    m.promo_until, m.sale_price_cents, m.banner_image_url, m.featured_order
+  FROM products p
+  LEFT JOIN categories c ON c.id = p.category_id
+  LEFT JOIN product_meta m ON m.product_id = p.id
+  WHERE p.active = 1
+  ORDER BY COALESCE(m.featured,0) DESC, COALESCE(m.featured_order,0) DESC, p.id DESC',
+    []
+  )
+  res.json({ products: r.rows })
+})
+
+app.post('/api/orders', async (req, res) => {
+  const { user_username, items = [], address, slot, notes,
+          fulfillment_type=null, delivery_details=null } = req.body || {}
+  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items erforderlich' })
+  try {
+    const order = await tx(async (dbx) => {
+      const tot = items.reduce((s, it) => s + (it.price_cents|0) * (it.qty|0), 0)
+      await dbx.query?.(
+        `INSERT INTO orders(user_username,address,slot,notes,status,subtotal_cents,delivery_fee_cents,total_cents,fulfillment_type,delivery_details_json,updated_at)
+         VALUES (?,?,?,?, 'wartet_bestätigung', ?, 0, ?, ?, ?, (datetime('now')))`,
+        [user_username||null, address||null, slot||null, notes||null, tot, tot,
+         fulfillment_type, JSON.stringify(delivery_details||{})]
+      )
+      const sel = await dbx.query?.('SELECT * FROM orders ORDER BY id DESC LIMIT 1', [])
+      const ord = sel.rows?.[0]
+      for (const it of items) {
+        await dbx.query?.(
+          `INSERT INTO order_items(order_id,product_id,name,price_cents,qty)
+           VALUES (?,?,?,?,?)`,
+          [ord.id, it.product_id||null, it.name||null, it.price_cents|0, it.qty|0]
+        )
+      }
+      return ord
+    })
+    res.json({ order })
+  } catch (e) {
+    console.error('[orders] tx error:', e?.message)
+    res.status(500).json({ error: 'order_failed' })
+  }
+})
+
+  try {
+    const order = await tx(async (dbx) => {
+      const tot = items.reduce((s, it) => s + (it.price_cents|0) * (it.qty|0), 0)
+      await dbx.query?.(
+        `INSERT INTO orders(user_username,address,slot,notes,status,subtotal_cents,delivery_fee_cents,total_cents)
+         VALUES (?,?,?,?, 'wartet_bestätigung', ?, 0, ?)`,
+        [user_username||null, address||null, slot||null, notes||null, tot, tot]
+      )
+      const sel = await dbx.query?.('SELECT * FROM orders ORDER BY id DESC LIMIT 1', [])
+      const ord = sel.rows?.[0]
+      for (const it of items) {
+        await dbx.query?.(
+          `INSERT INTO order_items(order_id,product_id,name,price_cents,qty)
+           VALUES (?,?,?,?,?)`,
+          [ord.id, it.product_id||null, it.name||null, it.price_cents|0, it.qty|0]
+        )
+      }
+      return ord
+    })
+    res.json({ order })
+  } catch (e) {
+    console.error('[orders] tx error:', e?.message)
+    res.status(500).json({ error: 'order_failed' })
+  }
+})
+app.get('/api/orders/:id/chat', async (req, res) => {
+  const r = await query(
+    'SELECT id, order_id, sender, ciphertext, iv, created_at FROM chat_messages WHERE order_id = ? ORDER BY id ASC',
+    [req.params.id|0]
+  )
+  res.json({ messages: r.rows })
+})
+app.post('/api/orders/:id/chat', async (req, res) => {
+  const { sender='', ciphertext='', iv='' } = req.body || {}
+  if (!sender || !ciphertext || !iv) return res.status(400).json({ error: 'Ungültige Nachricht' })
+  await query('INSERT INTO chat_messages(order_id,sender,ciphertext,iv) VALUES (?,?,?,?)',
+    [req.params.id|0, sender, ciphertext, iv])
+  res.json({ ok: true })
+})
+
+// ---- Portierte, erweiterte Routen (FCM, Status, Courier, SSE, Payments, …) ----
+app.use('/api', buildRoutes(JWT_SECRET))
+
+// ---- STATIC (web/dist) ----
+const dist = path.resolve(__dirname, '..', 'web', 'dist')
+app.use(express.static(dist, { index: false, fallthrough: true }))
+app.get(/^\/.*\.[\w]+$/, (_req, res) => res.status(404).end()) // keine Fallbacks für Assets
+app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')))
+
+app.listen(PORT, () => console.log(`Plug Fusion läuft auf :${PORT}`))
+
+app.use('/api', adminOrdersFallback)
