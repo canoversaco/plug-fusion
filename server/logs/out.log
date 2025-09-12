@@ -1,0 +1,52 @@
+nohup: ignoring input
+[db] Treiber: SQLite -> /root/plug-fusion/data/plug_fusion.db
+[routes] mounted: 00-admin-categories-extend.js
+[routes] mounted: 00-auth-login.js
+[routes] mounted: 00-public-core.js
+[routes] mounted: 00-public-menu-core.js
+[routes] mounted: 02-public-core.js
+[routes] mounted: admin-analytics.js
+[routes] mounted: admin-core.js
+[routes] mounted: admin-orders-fallback.js
+[routes] mounted: admin-users.js
+[routes] mounted: catalog-crud.js
+[routes] mounted: chat.js
+[routes] mounted: courier-panel.js
+[routes] mounted: orders-checkout.js
+[routes] mounted: orders-live.js
+[routes] skip plug-extended.js - Invalid regular expression flags
+[routes] mounted: wallet-profile.js
+[server] Plug Fusion läuft auf http://localhost:8080
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+[sqlite] query error (weiterlaufen): table products has no column named created_at
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'
+[sqlite] query error (weiterlaufen): no such column: eta_at
+[sqlite] query error (weiterlaufen): no such column: eta_at
+Error: ENOENT: no such file or directory, stat '/root/plug-fusion/web/dist/index.html'

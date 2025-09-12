@@ -1,0 +1,129 @@
+import express from 'express'
+import { query, tx } from '../db/index.js'
+import { requireAuth, requireRole } from '../mw/authz.js'
+import { subscribe, publish } from '../lib/sse.js'
+import { sendFcm } from '../lib/notify.js'
+
+export default function buildRoutes(JWT_SECRET){
+  const r = express.Router()
+
+  // --- FCM Token registrieren ---
+  r.post('/register-fcm', requireAuth, async (req, res)=>{
+    const { token, platform } = req.body||{}
+    if (!token) return res.status(400).json({ error:'missing_token' })
+    // user_id aus req.user.sub
+    await query('INSERT INTO fcm_tokens(user_id, token, platform) VALUES (?,?,?) ON CONFLICT(token) DO NOTHING', [req.user.sub, token, platform||null])
+    res.json({ ok:true })
+  })
+
+  // --- Broadcasts (Admin) ---
+  r.post('/broadcasts', requireRole('admin'), async (req,res)=>{
+    const { title, body, payload={} } = req.body||{}
+    if (!title || !body) return res.status(400).json({ error:'missing_fields' })
+    await query('INSERT INTO broadcasts(title, body, payload_json, created_by) VALUES (?,?,?,?)',
+      [title, body, JSON.stringify(payload||{}), req.user.username])
+    // Tokens sammeln
+    const tks = await query('SELECT token FROM fcm_tokens', [])
+    const serverKey = process.env.FCM_SERVER_KEY || ''
+    let sent=0
+    for (const row of tks.rows||[]) {
+      const r = await sendFcm(serverKey, row.token, { title, body }, payload)
+      if (r.ok) sent++
+    }
+    res.json({ ok:true, sent })
+  })
+
+  // --- Order-Status ändern + History + Push ---
+  r.post('/orders/:id/status', requireAuth, async (req,res)=>{
+    const id = req.params.id|0
+    const { status, note } = req.body||{}
+    if (!status) return res.status(400).json({ error:'missing_status' })
+
+    // Optional: Transition-Regeln (einfach gehalten)
+    const allowedByRole = {
+      admin: ['wartet_bestätigung','bestätigt','unterwegs','zugestellt','abgebrochen'],
+      courier: ['unterwegs','zugestellt'],
+      kunde: [] // Kunde darf hier nicht
+    }
+    const role = req.user.role
+    if (!allowedByRole[role] || !allowedByRole[role].includes(status)) return res.status(403).json({ error:'forbidden_status' })
+
+    await tx(async (dbx)=>{
+      await dbx.query('UPDATE orders SET status=?, updated_at=(datetime(\'now\')) WHERE id=?', [status, id])
+      await dbx.query('INSERT INTO order_status_history(order_id,status,note,by_username) VALUES (?,?,?,?)',
+        [id, status, note||null, req.user.username])
+    })
+
+    // Notify (vereinfachter Broadcast auf Chat-Channel + FCM an alle Token)
+    publish(`order:${id}`, { type:'status', status, note, by:req.user.username })
+    const tks = await query('SELECT token FROM fcm_tokens', [])
+    const serverKey = process.env.FCM_SERVER_KEY || ''
+    for (const row of tks.rows||[]) {
+      await sendFcm(serverKey, row.token, { title:`Bestellung #${id}`, body:`Status: ${status}` }, { orderId:id, status })
+    }
+
+    res.json({ ok:true })
+  })
+
+  // --- Bestellung (Admin/Kurier) claimen ---
+  r.post('/orders/:id/claim', requireRole('admin','courier'), async (req,res)=>{
+    const id = req.params.id|0
+    const courier = req.user.username
+    await query('UPDATE orders SET courier_username=? WHERE id=? AND (courier_username IS NULL OR courier_username="")', [courier, id])
+    res.json({ ok:true, courier })
+  })
+
+  // --- Kurier-Standort setzen + lesen ---
+  r.post('/courier/location', requireRole('courier'), async (req,res)=>{
+    const { lat, lng } = req.body||{}
+    if (typeof lat!=='number' || typeof lng!=='number') return res.status(400).json({ error:'bad_coords' })
+    await query('INSERT INTO courier_locations(courier_username,lat,lng,updated_at) VALUES (?,?,?,datetime(\'now\'))', [req.user.username, lat, lng])
+    res.json({ ok:true })
+  })
+  r.get('/courier/location/:username', requireAuth, async (req,res)=>{
+    const u = req.params.username
+    const r2 = await query('SELECT courier_username, lat, lng, updated_at FROM courier_locations WHERE courier_username=? ORDER BY id DESC LIMIT 1', [u])
+    res.json({ location: r2.rows?.[0]||null })
+  })
+
+  // --- CHAT: SSE Stream + Post (bestehendes /POST behalten) ---
+  r.get('/orders/:id/chat/stream', requireAuth, async (req,res)=>{
+    const id = req.params.id|0
+    res.writeHead(200, {
+      'cache-control': 'no-cache',
+      'content-type': 'text/event-stream',
+      'connection': 'keep-alive',
+      'access-control-allow-origin': '*'
+    })
+    res.write('\n')
+    subscribe(`order:${id}`, res)
+  })
+
+  // --- Payments: Intent + Webhook (Stub, erweiterbar) ---
+  r.post('/payments/intent', requireAuth, async (req,res)=>{
+    const { order_id, provider='crypto_stub', currency='EUR', amount_cents } = req.body||{}
+    if (!order_id || !amount_cents) return res.status(400).json({ error:'missing_fields' })
+    const r2 = await query(
+      'INSERT INTO payments(order_id,provider,currency,amount_cents,status,meta_json) VALUES (?,?,?,?,?,?)',
+      [order_id, provider, currency, amount_cents|0, 'pending', JSON.stringify({})]
+    )
+    // SQLite: keinen RETURNING → letzten Datensatz ziehen
+    const p = await query('SELECT * FROM payments ORDER BY id DESC LIMIT 1', [])
+    res.json({ payment: p.rows?.[0] })
+  })
+
+  r.post('/payments/webhook', async (req,res)=>{
+    // Hier könnte BTCPay/Provider die Zahlung bestätigen.
+    const { payment_id, status='confirmed', txid=null, meta={} } = req.body||{}
+    if (!payment_id) return res.status(400).json({ error:'missing_payment_id' })
+    await tx(async (dbx)=>{
+      await dbx.query('UPDATE payments SET status=?, txid=?, meta_json=?, updated_at=(datetime(\'now\')) WHERE id=?',
+        [status, txid, JSON.stringify(meta||{}), payment_id|0])
+      await dbx.query('INSERT INTO payment_events(payment_id,type,payload_json) VALUES (?,?,?)',
+        [payment_id|0, 'webhook', JSON.stringify({ status, txid, meta })])
+    })
+    res.json({ ok:true })
+  })
+
+  return r
+}
