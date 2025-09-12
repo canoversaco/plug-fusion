@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="viewport-fit=cover, width=device-width,initial-scale=1"/>
+    <title>Plug Fusion</title>
+    <style>
+      :root{--bg:#0B0F17;--panel:#0f172a;--text:#E2E8F0;--brand:#00E5A8;--brand2:#7C4DFF;}
+      html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+      .center{min-height:100dvh;display:grid;place-items:center}
+      .card{background:rgba(15,23,42,.85);border:1px solid #223;backdrop-filter:blur(6px);padding:24px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.35);width:min(420px,92vw)}
+      .input{width:100%;padding:10px 12px;border-radius:12px;border:1px solid #334155;background:#0b1220;color:var(--text);outline:none}
+      .btn{width:100%;padding:12px 14px;border-radius:12px;border:0;background:linear-gradient(90deg,var(--brand),var(--brand2));color:#0a0a0a;font-weight:700;cursor:pointer}
+      .muted{opacity:.7;font-size:12px}
+      .err{color:#ff6b6b;font-size:12px;margin-top:6px}
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
