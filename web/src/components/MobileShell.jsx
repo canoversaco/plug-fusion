@@ -1,0 +1,58 @@
+import AddToCartFx from './AddToCartFx.jsx'
+import React, { useEffect, useState } from 'react'
+import { Home, Grid2X2, Receipt, User, Truck, Shield } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext.jsx'
+
+const Item = ({active, label, Icon, onClick, accent}) => (
+  <button onClick={onClick}
+    className={"flex-1 flex flex-col items-center justify-center py-3 relative text-[12px] " +
+               (active ? "text-white" : "text-slate-300/80")}>
+    <Icon size={18} className="mb-1"/>
+    <span className="leading-none">{label}</span>
+    <span className={`absolute -bottom-1 h-[3px] w-10 rounded-full ${active ? (accent==='admin' ? 'bg-emerald-500' : accent==='courier' ? 'bg-emerald-400' : 'bg-white/70') : 'bg-transparent'}`}/>
+  </button>
+)
+
+export default function MobileShell({ children }){
+  const [pulse,setPulse] = useState(false)
+  useEffect(()=>{
+    const h = ()=>{ setPulse(true); setTimeout(()=>setPulse(false), 600) }
+    window.addEventListener('pf:cartPulse', h)
+    return ()=> window.removeEventListener('pf:cartPulse', h)
+  },[])
+
+  const { user } = useAuth()
+  const role = (user?.role||'user').toLowerCase()
+  const showCourier = role==='courier' || role==='admin'
+  const showAdmin   = role==='admin'
+
+  const keyFromHash = h => {
+    const k = (h||'').replace(/^#\//,'') || 'home'
+    return ['home','menu','orders','profile','courier','admin'].includes(k) ? k : 'home'
+  }
+  const [active,setActive]=useState(keyFromHash(window.location.hash))
+  useEffect(()=>{
+    const onHash=()=>setActive(keyFromHash(window.location.hash))
+    window.addEventListener('hashchange', onHash)
+    return ()=>window.removeEventListener('hashchange', onHash)
+  },[])
+  const go=k=>{ window.location.hash = '#/'+k; setActive(k) }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <div className="flex-1">{children}</div>
+      <nav className="fixed left-0 right-0 bottom-0 z-50 pf-bottom-nav pf-bottom-nav">
+        <div className="mx-auto max-w-xl px-3 pb-[env(safe-area-inset-bottom)]">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm flex">
+            <Item active={active==='home'}    label="Home"   Icon={Home}    onClick={()=>go('home')}/>
+            <Item active={active==='menu'}    label="Menü"   Icon={Grid2X2} onClick={()=>go('menu')}/>
+            <Item active={active==='orders'}  label="Best."  Icon={Receipt} onClick={()=>go('orders')}/>
+            <Item active={active==='profile'} label="Profil" Icon={User}    onClick={()=>go('profile')}/>
+            {showCourier && <Item active={active==='courier'} label="Kurier" Icon={Truck}  accent="courier" onClick={()=>go('courier')}/>}
+            {showAdmin   && <Item active={active==='admin'}   label="Admin"  Icon={Shield} accent="admin"   onClick={()=>go('admin')}/>}
+          </div>
+        <div className="absolute inset-0 pointer-events-none" /></div>
+      </nav>
+    </div>
+  )
+}

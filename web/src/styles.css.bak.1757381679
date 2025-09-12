@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Farben / Basis */
+:root{ --bg:#0B0F17; --panel:#0f172a; --text:#E2E8F0; }
+html,body{ height:100% }
+body{ background:var(--bg); color:var(--text); }
+
+/* Utility-Ergänzungen */
+.btn{
+  @apply inline-flex items-center justify-center rounded-2xl font-semibold transition active:scale-[0.99];
+  height:48px; padding:0 16px; background:linear-gradient(90deg,#00E5A8,#7C4DFF); color:#0a0a0a;
+}
+.btn-ghost{ @apply inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900/60 text-slate-100; height:44px; padding:0 12px; }
+.input{
+  @apply w-full h-12 rounded-xl border border-slate-700 bg-slate-900/60 px-3 outline-none focus:border-brand;
+}
+.card{ @apply rounded-2xl border border-slate-800 bg-slate-900/60 p-4; }
+.safe-bottom{ padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+.safe-top{ padding-top: calc(env(safe-area-inset-top) + 0.5rem); }
+.touch{ min-height:48px; }
+.bottom-bar{
+  @apply fixed bottom-0 inset-x-0 border-t border-slate-800 bg-slate-900/90 backdrop-blur;
+}
+.top-bar{
+  @apply sticky top-0 z-40 border-b border-slate-800 bg-slate-900/90 backdrop-blur;
+}
+

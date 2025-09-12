@@ -1,0 +1,41 @@
+{ 
+  "name": "plug",
+  "version": "3.0.0",
+  "description": "",
+  "keywords": [],
+  "main": "src/App",
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-scripts": "^5.0.0",
+    "react-leaflet": "5.0.0",
+    "leaflet": "1.9.4",
+    "firebase": "11.9.1",
+    "firebase-admin": "13.4.0",
+    "firebase-functions": "6.3.1",
+    "async_hooks": "1.0.0",
+    "ol": "10.6.1",
+    "ol-geocoder": "4.3.3",
+    "lucide-react": "0.525.0",
+    "@moonpay/moonpay-react": "1.10.2"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "loader-utils": "3.2.1",
+    "typescript": "5.7.2"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test --env=jsdom",
+    "serve-prod": "serve -s build -l 3000",
+    "eject": "react-scripts eject"
+  },
+  "browserslist": [
+    ">0.2%",
+    "not dead",
+    "not ie <= 11",
+    "not op_mini all"
+  ]
+}
