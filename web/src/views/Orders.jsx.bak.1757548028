@@ -1,0 +1,74 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import { useAuth } from '../auth/AuthContext.jsx'
+import LiveTracker from '../components/LiveTracker.jsx'
+import { ChevronRight, Package2 } from 'lucide-react'
+
+const STATUS_ORDER = ['offen','akzeptiert','in_arbeit','unterwegs','abgeschlossen']
+
+function Row({order, open, onToggle}){
+  const total = typeof order?.total_cents==='number' ? (order.total_cents/100).toFixed(2)+' €' : ''
+  const subtitle = order?.created_at ? new Date(order.created_at).toLocaleString() : ''
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+      <button onClick={onToggle} className="w-full p-3 flex items-center gap-3 active:scale-[0.999]">
+        <div className="w-10 h-10 rounded-xl bg-slate-800/60 grid place-items-center"><Package2 size={18}/></div>
+        <div className="text-left">
+          <div className="font-semibold">Bestellung #{order.id}</div>
+          <div className="text-xs opacity-70">{total} {subtitle && '• '+subtitle}</div>
+        </div>
+        <ChevronRight size={16} className={`ml-auto transition ${open?'rotate-90':''}`}/>
+      </button>
+      {open && (
+        <div className="p-3 pt-0">
+          <LiveTracker orderId={order.id}/>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function Orders(){
+  const { fetchWithAuth } = useAuth()
+  const [orders,setOrders]=useState([])
+  const [openId,setOpenId]=useState(null)
+  const [loading,setLoading]=useState(true)
+
+  useEffect(()=>{ (async()=>{
+    try{
+      const r = await fetchWithAuth('/api/my/orders').then(r=>r.json())
+      const list = r?.orders || r || []
+      setOrders(Array.isArray(list)? list : [])
+    }catch{ setOrders([]) }
+    setLoading(false)
+  })() },[])
+
+  const groups = useMemo(()=>{
+    const g={offen:[], akzeptiert:[], in_arbeit:[], unterwegs:[], abgeschlossen:[]}
+    for(const o of orders){
+      const k=(o?.status||'offen').toLowerCase()
+      if(g[k]) g[k].push(o); else (g.offen.push(o))
+    }
+    return g
+  },[orders])
+
+  return (
+    <div className="pf-pt-safe pf-pb-safe p-3 space-y-4">
+      {STATUS_ORDER.map(key=>{
+        const data = groups[key]||[]
+        return (
+          <div key={key} className="space-y-2">
+            <div className="text-sm font-semibold capitalize opacity-80">
+              {key.replace('_',' ')}
+              <span className="ml-2 text-xs opacity-60">({data.length})</span>
+            </div>
+            {loading && <div className="rounded-xl h-12 bg-slate-800/50 animate-pulse"/>}
+            {!loading && data.length===0 && <div className="text-xs opacity-60">Keine Bestellungen.</div>}
+            {data.map(o=>(
+              <Row key={o.id} order={o} open={openId===o.id} onToggle={()=>setOpenId(openId===o.id?null:o.id)} />
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}

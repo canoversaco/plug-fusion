@@ -1,0 +1,178 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import { useAuth } from '../auth/AuthContext.jsx'
+import { Package, Tag, Users, Wrench, Search, Truck, Trash2, Check, Clock, ChevronRight } from 'lucide-react'
+
+const norm = s=> (s||'').toString().toLowerCase().replace(/\s+/g,'_')
+const cents = v => typeof v==='number' ? (v/100).toFixed(2)+' €' : ''
+
+const Header = ({tab,setTab}) => {
+  const Btn = ({id,label,Icon}) => (
+    <button onClick={()=>setTab(id)}
+      className={`px-3 py-2 rounded-2xl border text-sm flex items-center gap-2 transition
+        ${tab===id?'border-emerald-500 bg-emerald-500/15 shadow-[0_0_0_1px_rgba(16,185,129,.25)]':'border-slate-800 bg-slate-900/60 hover:bg-slate-900/80'}`}>
+      <Icon size={14}/><span>{label}</span>
+    </button>
+  )
+  return (
+    <div className="rounded-2xl p-4 border border-slate-800 bg-gradient-to-r from-emerald-600/15 via-cyan-600/15 to-fuchsia-600/15 flex items-center justify-between">
+      <div className="flex items-center gap-2"><Package size={18}/><div className="text-xl font-extrabold">Admin</div></div>
+      <div className="flex flex-wrap gap-2">
+        <Btn id="orders" label="Bestellungen" Icon={Truck}/>
+        <Btn id="products" label="Produkte" Icon={Tag}/>
+        <Btn id="categories" label="Kategorien" Icon={Package}/>
+        <Btn id="users" label="Nutzer" Icon={Users}/>
+        <Btn id="tools" label="Tools" Icon={Wrench}/>
+      </div>
+    </div>
+  )
+}
+
+function OrdersAdmin(){
+  const { fetchWithAuth } = useAuth()
+  const [list,setList]=useState([]); const [q,setQ]=useState(''); const [open,setOpen]=useState(null); const [loading,setLoading]=useState(true)
+  async function load(){ setLoading(true); try{ const j=await fetchWithAuth('/api/admin/orders').then(r=>r.json()); setList(j?.orders||[]) }catch{ setList([]) } setLoading(false) }
+  useEffect(()=>{ load() },[])
+  const filtered = useMemo(()=>{ const t=q.trim().toLowerCase(); return list.filter(o=>!t || String(o.id).includes(t) || String(o.customer_name||'').toLowerCase().includes(t) || String(o.address||'').toLowerCase().includes(t)) },[list,q])
+  async function post(url, body){ const r=await fetchWithAuth(url,{method:'POST',headers:{'Content-Type':'application/json'},body: body?JSON.stringify(body):undefined}); return r.ok }
+
+  const Card = ({o}) => {
+    const cid = o.courier_id ?? o.assigned_courier_id ?? null
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+        <button className="w-full p-3 flex items-center gap-3" onClick={()=>setOpen(open===o.id?null:o.id)}>
+          <div className="w-10 h-10 rounded-xl bg-slate-800/60 grid place-items-center"><Truck size={18}/></div>
+          <div className="text-left">
+            <div className="font-semibold">#{o.id} • {cents(o.total_cents)}</div>
+            <div className="text-xs opacity-70">{o.created_at ? new Date(o.created_at).toLocaleString() : ''}</div>
+          </div>
+          <div className="ml-auto text-xs opacity-70 capitalize">{norm(o.status).replace('_',' ')}</div>
+          <ChevronRight size={16} className={`ml-2 transition ${open===o.id?'rotate-90':''}`}/>
+        </button>
+
+        {open===o.id && (
+          <div className="p-3 pt-0 space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {['offen','akzeptiert','in_arbeit','unterwegs','abgeschlossen'].map(s=>(
+                <button key={s}
+                  onClick={async()=>{ if(await post(`/api/admin/orders/${o.id}/status`,{status:s})) load() }}
+                  className={`px-3 py-1 rounded-xl border ${norm(o.status)===s?'border-emerald-500 bg-emerald-500/20':'border-slate-700 bg-slate-800/50'}`}>
+                  {s.replace('_',' ')}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Clock size={14} className="opacity-70"/>
+              <input type="datetime-local" className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-sm"
+                     onChange={async e=>{ const iso=new Date(e.target.value).toISOString(); if(await post(`/api/admin/orders/${o.id}/eta`,{eta_at:iso})) load() }} />
+            </div>
+            <div className="flex items-center gap-2">
+              <Truck size={14} className="opacity-70"/>
+              <input type="number" placeholder="Kurier-ID" defaultValue={cid||''}
+                     onKeyDown={async e=>{ if(e.key==='Enter'){ const v=parseInt(e.currentTarget.value||'0',10)||null; if(await post(`/api/admin/orders/${o.id}/assign`,{courier_id:v})) load() }}}
+                     className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-sm"/>
+              <button className="btn-ghost inline-flex items-center gap-1"><Check size={14}/> Enter</button>
+            </div>
+            <div className="pt-2">
+              <button className="btn-ghost text-rose-300 inline-flex items-center gap-2"
+                      onClick={async()=>{ if(confirm('Bestellung löschen?')){ if(await post(`/api/admin/orders/${o.id}/delete`)) load() } }}>
+                <Trash2 size={16}/> Löschen
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-60"/>
+          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Suche (ID, Kunde, Adresse)…" className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"/>
+        </div>
+        <button className="btn-ghost border border-slate-700" onClick={load}>Neu laden</button>
+      </div>
+
+      {loading && <div className="rounded-xl h-12 bg-slate-800/50 animate-pulse"/>}
+      {!loading && filtered.length===0 && <div className="text-xs opacity-70">Keine Bestellungen.</div>}
+      {filtered.map(o => <Card key={o.id} o={o} />)}
+    </div>
+  )
+}
+
+function GridList({title, items, icon:Icon, subtitleKey, imageKey}){
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-semibold opacity-80">{title} <span className="ml-1 text-xs opacity-60">({items?.length||0})</span></div>
+      {(!items || items.length===0) ? <div className="text-xs opacity-70">Keine Daten.</div> :
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {items.map(it=>(
+            <div key={it.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3 flex items-center gap-3">
+              {imageKey && (it[imageKey] ? <img src={it[imageKey]} alt="" className="w-12 h-12 rounded-xl object-cover"/> : <div className="w-12 h-12 rounded-xl bg-slate-800"/>)}
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{it.name || it.username || `#${it.id}`}</div>
+                {subtitleKey && <div className="text-xs opacity-70 truncate">{it[subtitleKey] ?? ''}</div>}
+              </div>
+            </div>
+          ))}
+        </div>}
+    </div>
+  )
+}
+
+function ToolsTab(){
+  const { fetchWithAuth } = useAuth()
+  const [id,setId]=useState(''); const [status,setStatus]=useState('bestätigt')
+  const map = { 'offen':'offen','bestätigt':'akzeptiert','akzeptiert':'akzeptiert','in arbeit':'in_arbeit','unterwegs':'unterwegs','abgeschlossen':'abgeschlossen' }
+  async function setOrderStatus(){
+    const sid = parseInt(id,10); if(!sid) return alert('Order-ID?')
+    const key = map[status]||'akzeptiert'
+    const ok = await fetchWithAuth(`/api/admin/orders/${sid}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:key})}).then(r=>r.ok)
+    alert(ok?'Status gesetzt.':'Fehler beim Setzen.')
+  }
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 w-full max-w-md">
+      <div className="font-semibold mb-3">Bestellstatus setzen</div>
+      <div className="flex gap-2">
+        <input value={id} onChange={e=>setId(e.target.value)} placeholder="Order-ID" className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"/>
+        <select value={status} onChange={e=>setStatus(e.target.value)} className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm">
+          <option>offen</option><option>bestätigt</option><option>in arbeit</option><option>unterwegs</option><option>abgeschlossen</option>
+        </select>
+        <button className="btn" onClick={setOrderStatus}>Status setzen</button>
+      </div>
+    </div>
+  )
+}
+
+export default function Admin(){
+  const { fetchWithAuth } = useAuth()
+  const [tab,setTab]=useState('orders')
+  const [products,setProducts]=useState([]), [categories,setCategories]=useState([]), [users,setUsers]=useState([])
+
+  useEffect(()=>{ (async()=>{
+    try{
+      const j = await fetch('/api/products').then(r=>r.json()).catch(()=>({}))
+      if (Array.isArray(j?.products)) setProducts(j.products)
+      if (Array.isArray(j?.categories)) setCategories(j.categories)
+    }catch{}
+    if (products.length===0){
+      try{ const r = await fetchWithAuth('/api/admin/products').then(r=>r.json()); if(Array.isArray(r?.products)) setProducts(r.products) }catch{}
+    }
+    if (categories.length===0){
+      try{ const r = await fetchWithAuth('/api/admin/categories').then(r=>r.json()); if(Array.isArray(r?.categories)) setCategories(r.categories) }catch{}
+    }
+    try{ const r = await fetchWithAuth('/api/admin/users').then(r=>r.json()); if(Array.isArray(r?.users)) setUsers(r.users) }catch{}
+  })() },[])
+
+  return (
+    <div className="pf-pt-safe pf-pb-safe p-3 space-y-4">
+      <Header tab={tab} setTab={setTab}/>
+      {tab==='orders' && <OrdersAdmin/>}
+      {tab==='products' && <GridList title="Produkte" items={products} icon={Tag} subtitleKey="price_cents" imageKey="image_url"/>}
+      {tab==='categories' && <GridList title="Kategorien" items={categories} icon={Package}/>}
+      {tab==='users' && <GridList title="Nutzer" items={users} icon={Users} subtitleKey="role"/>}
+      {tab==='tools' && <ToolsTab/>}
+    </div>
+  )
+}

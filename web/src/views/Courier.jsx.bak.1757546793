@@ -1,0 +1,197 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import { useAuth } from '../auth/AuthContext.jsx'
+import PageHeader from '../components/PageHeader.jsx'
+import LiveTracker from '../components/LiveTracker.jsx'
+import { Truck, ChevronRight, Clock, MapPin, Check, RotateCcw, Search, AlertTriangle, Trash2 } from 'lucide-react'
+
+const norm = s => (s||'').toString().toLowerCase().replace(/\s+/g,'_')
+const OPEN = new Set(['offen','pending','wartet_bestätigung','wartet_bestaetigung','neu','new'])
+const WORK = new Set(['offen','akzeptiert','in_arbeit','unterwegs'])
+const cents = v => typeof v==='number' ? (v/100).toFixed(2)+' €' : ''
+const courierIdOf = o => o?.courier_id ?? o?.assigned_courier_id ?? o?.courierId ?? o?.assignedCourierId ?? null
+
+function EtaBox({eta_at,onEta,onGps}){
+  const [iso,setIso]=useState(()=> eta_at ? new Date(eta_at).toISOString().slice(0,16) : new Date(Date.now()+20*60000).toISOString().slice(0,16))
+  const quick=m=>setIso(new Date(Date.now()+m*60000).toISOString().slice(0,16))
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 space-y-2">
+      <div className="text-xs opacity-80 flex items-center gap-2"><Clock size={14}/> ETA setzen</div>
+      <div className="flex flex-wrap gap-2">{[10,20,30,45].map(m=>(<button key={m} onClick={()=>quick(m)} className="px-3 py-1 rounded-xl border border-slate-700 bg-slate-800/50">{m} Min</button>))}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-[220px_1fr] gap-2">
+        <input type="datetime-local" value={iso} onChange={e=>setIso(e.target.value)} className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-sm"/>
+        <div className="flex gap-2">
+          <button className="btn inline-flex items-center gap-2" onClick={()=>onEta(iso)}><Check size={16}/> Setzen</button>
+          <button className="btn-ghost inline-flex items-center gap-2" onClick={onGps}><MapPin size={16}/> GPS</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Row({o, mine, open, onToggle, onAccept, onEta, onGps, onStatus, onDelete}){
+  const sKey = norm(o.status)||'offen'
+  const created = o?.created_at ? new Date(o.created_at).toLocaleString() : ''
+  const unassigned = courierIdOf(o)==null
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+      <button onClick={onToggle} className="w-full p-3 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-slate-800/60 grid place-items-center"><Truck size={18}/></div>
+        <div className="text-left">
+          <div className="font-semibold">#{o.id} • {cents(o.total_cents)}</div>
+          <div className="text-xs opacity-70">{created}</div>
+        </div>
+        <div className="ml-auto text-xs opacity-70 capitalize">{sKey.replace('_',' ')}</div>
+        <ChevronRight size={16} className={`ml-2 transition ${open?'rotate-90':''}`}/>
+      </button>
+
+      {open && (
+        <div className="p-3 pt-0 space-y-3">
+          {/* Bestellpositionen & Kunde */}
+          {(o.items?.length||0)>0 && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+              <div className="text-xs opacity-80 mb-2">Positionen</div>
+              <ul className="text-sm space-y-1">
+                {o.items.map((it,idx)=>(
+                  <li key={idx} className="flex justify-between gap-3"><span className="truncate">{it.name||it.product_name} × {it.qty||1}</span><span className="opacity-80">{cents(it.total_cents ?? it.price_cents)}</span></li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {o.address && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-sm opacity-80">
+              <div className="font-semibold opacity-90 mb-1">Kunde</div>
+              <div>{o.customer_name || '—'}</div>
+              <div className="truncate">{o.address}</div>
+            </div>
+          )}
+
+          {unassigned && OPEN.has(sKey) && <button className="btn w-full" onClick={onAccept}>Annehmen</button>}
+          {mine && <EtaBox eta_at={o?.eta_at} onEta={onEta} onGps={onGps}/>}
+
+          {/* Live Tracking (beim Aufklappen) */}
+          <LiveTracker orderId={o.id}/>
+
+          {mine && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+              <div className="text-xs opacity-80 mb-2">Status</div>
+              <div className="flex flex-wrap gap-2">
+                {['akzeptiert','in_arbeit','unterwegs','abgeschlossen'].map(s=>(
+                  <button key={s} onClick={()=>onStatus(s)}
+                    className={`px-3 py-1 rounded-xl border ${sKey===s?'border-emerald-500 bg-emerald-500/20':'border-slate-700 bg-slate-800/50'} capitalize`}>
+                    {s.replace('_',' ')}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {mine && (
+            <button className="btn-ghost text-rose-300 inline-flex items-center gap-2" onClick={onDelete}>
+              <Trash2 size={16}/> Löschen
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function Courier(){
+  const { fetchWithAuth, user } = useAuth()
+  const myId = user?.id
+  const role = user?.role || 'user'
+  const [orders,setOrders]=useState([])
+  const [openId,setOpenId]=useState(null)
+  const [loading,setLoading]=useState(true)
+  const [unauth,setUnauth]=useState(false)
+  const [q,setQ]=useState('')
+
+  async function load(){
+    setLoading(true); setUnauth(false)
+    let list=null
+    try{ const r=await fetchWithAuth('/api/courier/orders'); if(r.status===401) setUnauth(true); if(r.ok){ const j=await r.json(); if(Array.isArray(j?.orders)) list=j.orders } }catch{}
+    if(!Array.isArray(list)){ try{ const r=await fetchWithAuth('/api/admin/orders'); if(r.ok){ const j=await r.json(); if(Array.isArray(j?.orders)) list=j.orders } }catch{} }
+    if(!Array.isArray(list)){ try{ const r=await fetchWithAuth('/api/orders'); if(r.ok){ const j=await r.json(); if(Array.isArray(j)) list=j; if(Array.isArray(j?.orders)) list=j.orders } }catch{} }
+    setOrders(Array.isArray(list)? list: []); setLoading(false)
+  }
+  useEffect(()=>{ load() },[])
+
+  const groups = useMemo(()=>{
+    const t=q.trim().toLowerCase()
+    const match = o => !t || String(o.id).includes(t) || String(o.customer_name||'').toLowerCase().includes(t) || String(o.address||'').toLowerCase().includes(t)
+    const g={eingehend:[], bearbeiten:[], abgeschlossen:[]}
+    for(const raw of orders){
+      const o = raw || {}
+      if(!match(o)) continue
+      const s=norm(o.status)
+      const cid=courierIdOf(o)
+      const mine=myId!=null && cid==myId
+      if(!cid && (OPEN.has(s) || (role==='admin' && WORK.has(s)))) { g.eingehend.push({...o,_mine:false}); continue }
+      if(mine && WORK.has(s)) { g.bearbeiten.push({...o,_mine:true}); continue }
+      if(mine && s==='abgeschlossen') { g.abgeschlossen.push({...o,_mine:true}) }
+    }
+    if(role==='admin' && g.eingehend.length===0){
+      for(const o of orders){ if(norm(o.status)==='offen') g.eingehend.push({...o,_mine:false}) }
+    }
+    for(const k of Object.keys(g)){ g[k].sort((a,b)=> (new Date(b.created_at||b.id) - new Date(a.created_at||a.id))) }
+    return g
+  },[orders,myId,q,role])
+
+  async function post(u,b){ const r=await fetchWithAuth(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}); return r.ok }
+  const accept = async(id)=>{ const body={courier_id:myId}; const ok=await post('/api/courier/orders/'+id+'/assign',body)||await post('/api/admin/orders/'+id+'/assign',body)||await post('/api/orders/'+id+'/assign',body); if(ok){ await load(); setOpenId(id)} else alert('Konnte Bestellung nicht annehmen.') }
+  const setEta = async(id,iso)=>{ const body={eta_at:new Date(iso).toISOString()}; const ok=await post('/api/courier/orders/'+id+'/eta',body)||await post('/api/admin/orders/'+id+'/eta',body)||await post('/api/orders/'+id+'/eta',body); if(ok) await load(); else alert('ETA fehlgeschlagen.') }
+  const sendGps = async(id)=>{ if(!navigator.geolocation) return alert('Kein GPS'); navigator.geolocation.getCurrentPosition(async p=>{ const body={lat:p.coords.latitude,lng:p.coords.longitude}; const ok=await post('/api/courier/orders/'+id+'/loc',body)||await post('/api/orders/'+id+'/loc',body); if(ok) await load(); else alert('GPS fehlgeschlagen.') },()=>alert('GPS verweigert')) }
+  const setStatus = async(id,s)=>{ const ok=await post('/api/courier/orders/'+id+'/status',{status:s})||await post('/api/admin/orders/'+id+'/status',{status:s})||await post('/api/orders/'+id+'/status',{status:s}); if(ok) await load(); else alert('Status fehlgeschlagen.') }
+  const delOrder = async(id)=>{
+    if(!confirm('Bestellung #'+id+' löschen?')) return;
+    const ok = await post('/api/admin/orders/'+id+'/delete') || await post('/api/courier/orders/'+id+'/delete');
+    if(ok) await load(); else alert('Löschen fehlgeschlagen.');
+  }
+
+  const Section = ({title,data})=>(
+    <div className="space-y-2">
+      <div className="text-sm font-semibold opacity-80">{title} <span className="ml-2 text-xs opacity-60">({data.length})</span></div>
+      {loading && <div className="rounded-xl h-12 bg-slate-800/50 animate-pulse"/>}
+      {!loading && data.length===0 && <div className="text-xs opacity-60">Keine Bestellungen.</div>}
+      {data.map(o=>(
+        <Row key={o.id}
+             o={o} mine={o._mine===true}
+             open={openId===o.id}
+             onToggle={()=>setOpenId(openId===o.id?null:o.id)}
+             onAccept={()=>accept(o.id)}
+             onEta={(iso)=>setEta(o.id,iso)}
+             onGps={()=>sendGps(o.id)}
+             onStatus={(s)=>setStatus(o.id,s)}
+             onDelete={()=>delOrder(o.id)}
+        />
+      ))}
+    </div>
+  )
+
+  return (
+    <div className="pf-pt-safe pf-pb-safe">
+      <PageHeader icon={Truck} title="Kurier" subtitle="Eingehende, zu bearbeitende und abgeschlossene Bestellungen" />
+      <div className="max-w-screen-md mx-auto p-3 space-y-4">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-60"/>
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Suche (ID, Name, Adresse)…"
+                   className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm"/>
+          </div>
+          <button className="btn-ghost px-3 py-2 rounded-xl border border-slate-700" onClick={load}><RotateCcw size={16}/></button>
+        </div>
+
+        <Section title="Eingehend" data={groups.eingehend}/>
+        <Section title="Zu bearbeiten" data={groups.bearbeiten}/>
+        <Section title="Abgeschlossen" data={groups.abgeschlossen}/>
+
+        {unauth && (
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm flex items-start gap-2">
+            <AlertTriangle size={16} className="mt-0.5 text-amber-300"/>
+            <div><div className="font-semibold">Nicht angemeldet / keine Berechtigung</div><div className="text-xs opacity-80">Bitte als Kurier oder Admin einloggen.</div></div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

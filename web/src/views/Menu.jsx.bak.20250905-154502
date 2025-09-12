@@ -1,0 +1,247 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import { ShoppingCart, LayoutGrid, List, Tag } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext.jsx'
+
+function usePersistentCart(){
+  const [cart, setCart] = useState(()=>{ try { return JSON.parse(localStorage.getItem('pf_cart')||'[]') } catch { return [] } })
+  const persist = (c)=>{ setCart(c); localStorage.setItem('pf_cart', JSON.stringify(c)) }
+  const add = (item)=>{ const next=[...cart]; const i=next.findIndex(x=>x.id===item.id && x.grams===item.grams); if(i>=0) next[i].qty+=item.qty||1; else next.push({...item, qty:item.qty||1}); persist(next) }
+  const inc = (id,grams)=> persist(cart.map(x=> x.id===id && x.grams===grams ? {...x, qty:x.qty+1} : x))
+  const dec = (id,grams)=> persist(cart.flatMap(x=> x.id===id && x.grams===grams ? (x.qty>1?[{...x, qty:x.qty-1}]:[]) : [x]))
+  const clear = ()=> persist([])
+  const total = cart.reduce((s,x)=> s + x.price_cents*x.qty, 0)
+  const count = cart.reduce((s,x)=> s + x.qty, 0)
+  return { cart, add, inc, dec, clear, total, count }
+}
+
+export default function Menu(){
+  const { fetchWithAuth } = useAuth()
+  const [categories, setCategories] = useState([])
+  const [products, setProducts] = useState([])
+  const [tiers, setTiers] = useState([])
+  const [cat, setCat] = useState('all')
+  const [q, setQ] = useState('')
+  const [sale, setSale] = useState(false)
+  const [feat, setFeat] = useState(false)
+  const [view, setView] = useState('list')
+  const [toast, setToast] = useState('')
+  const [showCart, setShowCart] = useState(false)
+  const [selGrams, setSelGrams] = useState({}) // productId -> grams
+  const cart = usePersistentCart()
+
+  useEffect(()=>{ (async()=>{
+    // Produkte & (Fallback-)Kategorien
+    const prodRes = await fetch('/api/products').then(r=>r.json()).catch(()=>({}))
+    setProducts(prodRes.products||[])
+    let cats = prodRes.categories || []
+
+    // Kategorien inkl. Highlight einlesen (wenn Route vorhanden)
+    try {
+      const cr = await fetch('/api/categories').then(r=> r.ok? r.json(): {categories:[]})
+      if (cr?.categories?.length) cats = cr.categories
+    } catch {}
+
+    setCategories(cats)
+
+    // Preis-Tiers laden (wenn Route vorhanden)
+    try {
+      const tr = await fetch('/api/product-tiers').then(r=> r.ok? r.json(): {tiers:[]})
+      setTiers(tr.tiers||[])
+    } catch { setTiers([]) }
+  })() },[])
+
+  useEffect(()=>{ if (!toast) return; const t=setTimeout(()=>setToast(''), 1200); return ()=>clearTimeout(t) },[toast])
+
+  const cats = useMemo(()=>[{id:'all', name:'Alle', highlight:0}, ...categories], [categories])
+
+  const tiersMap = useMemo(()=>{
+    const m = new Map()
+    for (const t of (tiers||[])){
+      const key = Number(t.product_id)
+      if (!m.has(key)) m.set(key, [])
+      m.get(key).push({ grams: Number(t.grams), price_cents: Number(t.price_cents) })
+    }
+    for (const [k,arr] of m) arr.sort((a,b)=>a.grams-b.grams)
+    return m
+  },[tiers])
+
+  const shown = useMemo(()=>{
+    const s = q.trim().toLowerCase()
+    return (products||[]).filter(p=>{
+      if (cat!=='all' && String(p.category_id)!==String(cat)) return false
+      if (sale && p.sale_price_cents==null) return false
+      if (feat && !p.featured) return false
+      if (!s) return true
+      return (p.name||'').toLowerCase().includes(s) || (p.category_name||'').toLowerCase().includes(s)
+    })
+  },[q, cat, sale, feat, products])
+
+  const addToCart = (p)=>{
+    const list = tiersMap.get(p.id) || [{ grams:1, price_cents: Number(p.price_cents||0)}]
+    const g = selGrams[p.id] ?? list[0].grams
+    const tier = list.find(x=>x.grams===g) || list[0]
+    cart.add({ id:p.id, grams: tier.grams, name:`${p.name} • ${tier.grams}g`, price_cents: tier.price_cents, image_url:p.image_url })
+    setToast('Zum Warenkorb hinzugefügt')
+  }
+
+  return (
+    <div className="space-y-3 pf-pb-safe">
+      {/* Sticky: Suche & Controls */}
+      <div className="pf-sticky p-3 space-y-2">
+        <div className="flex gap-2">
+          <input className="input flex-1" placeholder="Suche im Menü…" value={q} onChange={e=>setQ(e.target.value)} />
+          <button className="btn-ghost" onClick={()=>setView(v=> v==='list'?'grid':'list')} title="Ansicht wechseln">
+            {view==='list' ? <LayoutGrid size={18}/> : <List size={18}/>}
+          </button>
+          <button className="btn-ghost" onClick={()=>setSale(s=>!s)} title="Sale filtern">
+            <Tag size={18} className={sale?'opacity-100':'opacity-50'} />
+          </button>
+        </div>
+        {/* Kategorie-Chips (mit Glow für highlight) */}
+        <div className="pf-catbar">
+          {cats.map(c=>{
+            const isActive = String(cat)===String(c.id)
+            const cls = 'pf-chip ' + (isActive?'pf-chip-active ':'') + (c.highlight ? 'pf-chip-featured' : '')
+            const style = c.highlight ? { color: (c.highlight_color||'#22c55e') } : {}
+            return <button key={c.id} className={cls} style={style} onClick={()=>setCat(c.id)}>{c.name}</button>
+          })}
+          <label className="pf-chip" style={{background:'transparent'}}>
+            <input type="checkbox" checked={feat} onChange={e=>setFeat(e.target.checked)} />&nbsp;Highlights
+          </label>
+        </div>
+      </div>
+
+      {/* Produktliste – kompakt */}
+      {shown.length===0 && <div className="card m-3">Keine Produkte gefunden.</div>}
+
+      <div className={(view==='grid' ? 'grid grid-cols-2 gap-2 p-3' : 'space-y-2 p-3')}>
+        {shown.map(p=>{
+          const list = tiersMap.get(p.id) || [{ grams:1, price_cents: Number(p.price_cents||0)}]
+          const g = selGrams[p.id] ?? list[0].grams
+          const current = list.find(x=>x.grams===g) || list[0]
+
+          if (view==='grid'){
+            return (
+              <div key={p.id} className="card p-2">
+                <div className="pf-thumb" style={{width:72,height:72, marginBottom:6}}>
+                  {p.image_url && <img src={p.image_url} alt={p.name} loading="lazy" />}
+                </div>
+                <div className="font-semibold text-[13px] leading-snug line-clamp-2">{p.name}</div>
+
+                {/* Gramm-Auswahl */}
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {list.map(t=>{
+                    const active = t.grams===g
+                    return (
+                      <button key={t.grams} className={'pf-qtychip '+(active?'pf-qtychip-active':'')}
+                        onClick={()=>setSelGrams(s=>({...s, [p.id]: t.grams}))}>
+                        {t.grams}g
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Preis */}
+                <div className="text-[13px] mt-2"><span className="font-semibold">{(current.price_cents/100).toFixed(2)} €</span></div>
+                <button className="btn w-full mt-2 py-2" onClick={()=>addToCart(p)}>
+                  <ShoppingCart size={16} className="mr-1" /> In den Warenkorb
+                </button>
+              </div>
+            )
+          }
+
+          // LIST – sehr kompakt
+          return (
+            <div key={p.id} className="card">
+              <div className="flex gap-2">
+                <div className="pf-thumb">{p.image_url && <img src={p.image_url} alt={p.name} loading="lazy" />}</div>
+                <div className="flex-1">
+                  <div className="font-semibold text-[14px] leading-tight line-clamp-2">{p.name}</div>
+                  <div className="pf-meta">{p.category_name || '—'}</div>
+
+                  {/* Gramm-Auswahl */}
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {list.map(t=>{
+                      const active = t.grams===g
+                      return (
+                        <button key={t.grams} className={'pf-qtychip '+(active?'pf-qtychip-active':'')}
+                          onClick={()=>setSelGrams(s=>({...s, [p.id]: t.grams}))}>
+                          {t.grams}g
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="mt-1 text-[13px]">
+                    <span className="pf-price">{(current.price_cents/100).toFixed(2)} €</span>
+                  </div>
+                </div>
+              </div>
+              <button className="btn w-full mt-2 py-2" onClick={()=>addToCart(p)}>
+                <ShoppingCart size={16} className="mr-1" /> In den Warenkorb
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Floating Cart Shortcut */}
+      <button className="fixed right-3 bottom-20 btn z-30" onClick={()=>setShowCart(true)}>
+        <ShoppingCart size={18} className="mr-2" /> {cart.count} • {(cart.total/100).toFixed(2)} €
+      </button>
+
+      {/* Warenkorb-Overlay (mit grams) */}
+      {showCart && (
+        <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end" onClick={(e)=>{ if (e.target===e.currentTarget) setShowCart(false) }}>
+          <div className="w-full bg-slate-950 border-t border-slate-800 rounded-t-2xl p-3 space-y-3 max-h-[80vh] overflow-auto">
+            <div className="flex items-center justify-between">
+              <div className="font-bold text-lg">Warenkorb</div>
+              <button className="btn-ghost" onClick={()=>setShowCart(false)}>Schließen</button>
+            </div>
+            {cart.cart.length===0 ? (
+              <div className="card">Der Warenkorb ist leer.</div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  {cart.cart.map(x=>(
+                    <div key={x.id+'-'+x.grams} className="card flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {x.image_url && <div className="pf-thumb" style={{width:48,height:48}}><img src={x.image_url} alt="" /></div>}
+                        <div>
+                          <div className="font-semibold text-[14px] leading-tight line-clamp-2">{x.name}</div>
+                          <div className="pf-meta">{x.grams}g • {(x.price_cents/100).toFixed(2)} €</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button className="btn-ghost" onClick={()=>cart.dec(x.id, x.grams)}>-</button>
+                        <div className="w-6 text-center">{x.qty}</div>
+                        <button className="btn-ghost" onClick={()=>cart.inc(x.id, x.grams)}>+</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="pf-meta">Zwischensumme</div>
+                  <div className="text-xl font-extrabold">{(cart.total/100).toFixed(2)} €</div>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn-ghost flex-1" onClick={()=>cart.clear()}>Leeren</button>
+                  <button className="btn flex-1" onClick={async ()=>{
+                    const payload = { items: cart.cart.map(it=>({ product_id: it.id, grams: it.grams, qty: it.qty })), mode:'pickup', pay_with_wallet:false }
+                    const r = await fetchWithAuth('/api/orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) })
+                    const d = await r.json().catch(()=>null)
+                    if (r.ok && d?.ok){ cart.clear(); setShowCart(false); setToast('✅ Bestellung erstellt') } else setToast('❌ Bestellung fehlgeschlagen')
+                  }}>Zur Kasse</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-50 card px-3 py-2">{toast}</div>
+      )}
+    </div>
+  )
+}

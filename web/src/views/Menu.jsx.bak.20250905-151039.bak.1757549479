@@ -1,0 +1,173 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import { ShoppingCart, Filter } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext.jsx'
+
+function usePersistentCart(){
+  const [cart, setCart] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem('pf_cart')||'[]') } catch { return [] }
+  })
+  const persist = (c)=>{ setCart(c); localStorage.setItem('pf_cart', JSON.stringify(c)) }
+  const add = (p)=>{
+    const next = [...cart]
+    const i = next.findIndex(x=>x.id===p.id)
+    if (i>=0) next[i].qty += 1
+    else next.push({ id:p.id, name:p.name, price_cents: p.sale_price_cents ?? p.price_cents, qty:1, image_url:p.image_url })
+    persist(next)
+  }
+  const inc = (id)=> persist(cart.map(x=> x.id===id ? {...x, qty:x.qty+1} : x))
+  const dec = (id)=> persist(cart.flatMap(x=> x.id===id ? (x.qty>1 ? [{...x, qty:x.qty-1}] : []) : [x]))
+  const clear = ()=> persist([])
+  const total = cart.reduce((s,x)=> s + x.price_cents*x.qty, 0)
+  const count = cart.reduce((s,x)=> s + x.qty, 0)
+  return { cart, add, inc, dec, clear, total, count }
+}
+
+export default function Menu(){
+  const [data, setData] = useState({ categories:[], products:[] })
+  const [activeCat, setActiveCat] = useState('all')
+  const [q, setQ] = useState('')
+  const [onlySale, setOnlySale] = useState(false)
+  const [onlyFeatured, setOnlyFeatured] = useState(false)
+  const [showCart, setShowCart] = useState(false)
+  const [toast, setToast] = useState('')
+  const { fetchWithAuth } = useAuth()
+  const cart = usePersistentCart()
+
+  useEffect(()=>{ (async()=>{
+    const d = await fetch('/api/products').then(r=>r.json()).catch(()=>({}))
+    setData({ categories: d.categories||[], products: d.products||[] })
+  })() },[])
+
+  useEffect(()=>{ if (!toast) return; const t=setTimeout(()=>setToast(''), 1200); return ()=>clearTimeout(t) },[toast])
+
+  const cats = useMemo(()=>[{id:'all', name:'Alle'}, ...data.categories], [data.categories])
+
+  const shown = useMemo(()=>{
+    const s = q.trim().toLowerCase()
+    return (data.products||[]).filter(p=>{
+      if (activeCat!=='all' && String(p.category_id)!==String(activeCat)) return false
+      if (onlySale && p.sale_price_cents==null) return false
+      if (onlyFeatured && !p.featured) return false
+      if (!s) return true
+      return (p.name||'').toLowerCase().includes(s) || (p.category_name||'').toLowerCase().includes(s)
+    })
+  },[q, activeCat, onlySale, onlyFeatured, data.products])
+
+  const checkout = async ()=>{
+    if (cart.cart.length===0) return
+    const payload = { items: cart.cart.map(x=>({ product_id:x.id, qty:x.qty })), mode: 'pickup', pay_with_wallet: false }
+    const r = await fetchWithAuth('/api/orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) })
+    const d = await r.json().catch(()=>null)
+    if (r.ok && d?.ok){
+      cart.clear()
+      setShowCart(false)
+      setToast('✅ Bestellung erstellt')
+    } else {
+      setToast('❌ Bestellung fehlgeschlagen')
+    }
+  }
+
+  return (
+    <div className="space-y-4 pf-pb-safe pf-pt-safe">
+      {/* Kategorie-Pills */}
+      <div className="pf-scroll-x pf-hide-scroll">
+        {cats.map(c=>(
+          <button key={c.id} onClick={()=>setActiveCat(c.id)} className={'pf-pill ' + (String(activeCat)===String(c.id)?'bg-emerald-600 text-white':'bg-slate-800')}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Suche + Filter */}
+      <div className="grid grid-cols-2 gap-2">
+        <input className="input col-span-2" placeholder="Suche…" value={q} onChange={e=>setQ(e.target.value)} />
+        <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={onlySale} onChange={e=>setOnlySale(e.target.checked)} /> Sale</label>
+        <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={onlyFeatured} onChange={e=>setOnlyFeatured(e.target.checked)} /> Highlights</label>
+      </div>
+
+      {/* Produkte – stabile Karten */}
+      {shown.length===0 && <div className="card">Keine Produkte gefunden.</div>}
+      <div className="grid grid-cols-2 gap-3">
+        {shown.map(p=>{
+          const price = (p.sale_price_cents ?? p.price_cents)/100
+          const struck = p.sale_price_cents!=null
+          return (
+            <div key={p.id} className="card flexcol p-0 overflow-hidden">
+              <div className="pf-aspect-4-3">{(p.image_url) ? <img src={p.image_url} alt={p.name} loading="lazy" /> : null}</div>
+              <div className="p-2 grow">
+                <div className="font-semibold text-sm">{p.name}</div>
+                <div className="flex items-center gap-2 mt-1">
+                  {p.badge_text && <div className="pf-pill text-[10px]" style={{background:p.badge_color||'#22c55e'}}>{p.badge_text}</div>}
+                  {p.featured ? <div className="pf-pill bg-fuchsia-600/70 text-white text-[10px]">Featured</div> : null}
+                </div>
+                <div className="text-sm mt-1">
+                  {struck && <span className="opacity-60 line-through mr-1">{(p.price_cents/100).toFixed(2)} €</span>}
+                  <span className="font-semibold">{price.toFixed(2)} €</span>
+                </div>
+              </div>
+              <div className="p-2">
+                <button className="btn w-full" onClick={()=>{ cart.add(p); setToast('Zum Warenkorb hinzugefügt') }}>
+                  <ShoppingCart size={16} className="mr-1" /> In den Warenkorb
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Floating Cart Button */}
+      <button className="fixed right-3 bottom-3 z-20 btn" onClick={()=>setShowCart(true)}>
+        <ShoppingCart size={18} className="mr-2" /> Warenkorb ({cart.count})
+      </button>
+
+      {/* Cart Overlay */}
+      {showCart && (
+        <div className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-end">
+          <div className="w-full bg-slate-950 border-t border-slate-800 rounded-t-2xl p-3 space-y-3 max-h-[80vh] overflow-auto">
+            <div className="flex items-center justify-between">
+              <div className="font-bold text-lg">Warenkorb</div>
+              <button className="btn-ghost" onClick={()=>setShowCart(false)}>Schließen</button>
+            </div>
+            {cart.cart.length===0 ? (
+              <div className="card">Der Warenkorb ist leer.</div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  {cart.cart.map(x=>(
+                    <div key={x.id} className="card flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {x.image_url && <img src={x.image_url} className="w-12 h-12 object-cover rounded-lg" alt="" />}
+                        <div>
+                          <div className="font-semibold">{x.name}</div>
+                          <div className="text-xs opacity-70">{(x.price_cents/100).toFixed(2)} €</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button className="btn-ghost" onClick={()=>cart.dec(x.id)}>-</button>
+                        <div className="w-6 text-center">{x.qty}</div>
+                        <button className="btn-ghost" onClick={()=>cart.inc(x.id)}>+</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-sm opacity-80">Summe</div>
+                  <div className="text-xl font-extrabold">{(cart.total/100).toFixed(2)} €</div>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn-ghost flex-1" onClick={()=>cart.clear()}>Leeren</button>
+                  <button className="btn flex-1" onClick={checkout}>Zur Kasse</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Mini-Toast */}
+      {toast && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-20 z-40 card px-3 py-2">{toast}</div>
+      )}
+    </div>
+  )
+}
